@@ -871,56 +871,75 @@ app.get('/api/search', requireAuth, a(async (req, res) => {
   });
 }));
 
-// Full DDG results proxy — fetches html.duckduckgo.com, rewrites links to open in new tab
+// Full DDG results — parses html.duckduckgo.com and returns clean JSON
 app.get('/api/search/results', requireAuth, a(async (req, res) => {
   const q = (req.query.q || '').trim();
-  if (!q) return res.status(400).send('<p>No query</p>');
+  if (!q) return res.json({ results: [] });
 
   try {
-    let html = await fetchText(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`);
+    const html = await fetchText(
+      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`
+    );
 
-    // Make all result links open in new tab and go directly to the target URL
-    // DDG HTML wraps links through /l/?uddg=<encoded url> — decode them
-    html = html.replace(/href="\/l\/\?(?:[^"]*&)?uddg=([^"&]+)[^"]*"/g, (_, enc) => {
-      try { return `href="${decodeURIComponent(enc)}" target="_blank" rel="noopener"`; }
-      catch { return `href="#" target="_blank"`; }
-    });
+    // HTML entity decoder
+    const deEnt = s => s
+      .replace(/&amp;/g,  '&').replace(/&lt;/g,   '<').replace(/&gt;/g,   '>')
+      .replace(/&quot;/g, '"').replace(/&#39;/g,   "'").replace(/&nbsp;/g, ' ');
 
-    // Any remaining relative DDG links → absolute
-    html = html.replace(/href="\//g, 'href="https://duckduckgo.com/');
+    // Decode a DDG redirect href → real target URL
+    const decodeHref = raw => {
+      let url = deEnt(raw);
+      if (url.startsWith('//')) url = 'https:' + url;
+      // /l/?uddg=<encoded> or absolute https://duckduckgo.com/l/?uddg=<encoded>
+      const m = url.match(/[?&]uddg=([^&]+)/);
+      if (m) { try { url = decodeURIComponent(m[1]); } catch {} }
+      return url;
+    };
 
-    // Strip DDG header/nav/footer, keep just the results
-    const resultsMatch = html.match(/<div[^>]+id="links"[^>]*>([\s\S]*?)<\/div>\s*<div[^>]+class="[^"]*nav[^"]*"/);
-    const resultsHtml = resultsMatch ? resultsMatch[1] : html;
+    const results = [];
 
-    // Wrap in minimal styled page with click-intercept script (sends clicked URL to parent)
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8">
-      <style>
-        body{font-family:system-ui,sans-serif;margin:0;padding:1rem;background:#fff;color:#222;font-size:14px}
-        .result{margin-bottom:1.4rem}
-        .result-title a{font-size:16px;font-weight:600;color:#1a0dab;text-decoration:none}
-        .result-title a:hover{text-decoration:underline}
-        .result-url{font-size:12px;color:#006621;margin:.15rem 0}
-        .result-snippet{color:#545454;line-height:1.5}
-        .no-results{color:#888;padding:2rem;text-align:center}
-        a{cursor:pointer}
-      </style>
-      <script>
-        document.addEventListener('click', function(e) {
-          const a = e.target.closest('a[href]');
-          if (!a) return;
-          const href = a.href;
-          // Let DuckDuckGo search nav links pass through (go to next page, etc.)
-          if (href.includes('duckduckgo.com/html')) { return; }
-          // Everything else → open in parent browse pane
-          e.preventDefault();
-          window.parent.postMessage({ type: 'ddg-link', url: href }, '*');
-        });
-      <\/script>
-      </head><body>${resultsHtml}<p style="color:#aaa;font-size:11px;text-align:center;padding:1rem 0">Results from DuckDuckGo — click any result to browse within TeamCal</p></body></html>`);
+    // Extract title links  (result__a)
+    const titleLinks = [];
+    const tlRe = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+    let m;
+    while ((m = tlRe.exec(html)) !== null) {
+      const url   = decodeHref(m[1]);
+      const title = deEnt(m[2].replace(/<[^>]+>/g, '').trim());
+      if (url.startsWith('http') && title) titleLinks.push({ url, title });
+    }
+
+    // Extract display URL text  (result__url)
+    const dispUrls = [];
+    const duRe = /<a[^>]+class="[^"]*result__url[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
+    while ((m = duRe.exec(html)) !== null) {
+      dispUrls.push(deEnt(m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()));
+    }
+
+    // Extract snippets  (result__snippet)
+    const snippets = [];
+    const snRe = /<[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/(?:a|div|span)>/g;
+    while ((m = snRe.exec(html)) !== null) {
+      const text = deEnt(m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+      if (text) snippets.push(text);
+    }
+
+    for (let i = 0; i < titleLinks.length; i++) {
+      const { url, title } = titleLinks[i];
+      let hostname = '';
+      try { hostname = new URL(url).hostname; } catch {}
+      results.push({
+        url,
+        title,
+        displayUrl: dispUrls[i] || hostname,
+        snippet:    snippets[i] || '',
+        favicon:    `https://icons.duckduckgo.com/ip3/${hostname}.ico`,
+      });
+    }
+
+    res.json({ results });
   } catch (e) {
-    res.status(502).send('<p style="font-family:sans-serif;padding:1rem">Could not load results. Try again.</p>');
+    console.error('[search/results]', e.message);
+    res.status(502).json({ error: 'Could not load results', results: [] });
   }
 }));
 

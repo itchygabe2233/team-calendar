@@ -1944,185 +1944,164 @@ async function deleteTicketAdmin(id) {
 }
 
 // ================================================================
-// SEARCH (DuckDuckGo)
+// SEARCH (DuckDuckGo-style)
 // ================================================================
 
-// Listen for link-click messages from the /api/search/results iframe
-window.addEventListener('message', function(e) {
-  if (e.data && e.data.type === 'ddg-link') {
-    openBrowseUrl(e.data.url);
-  }
-});
-
 function openBrowseUrl(url) {
-  // Show a browse pane inside the search page
-  let pane = document.getElementById('search-browse-pane');
+  const pane        = document.getElementById('search-browse-pane');
+  const placeholder = document.getElementById('search-browse-placeholder');
   if (!pane) return;
   pane.style.display = 'flex';
+  if (placeholder) placeholder.style.display = 'none';
   pane.innerHTML = `
     <div class="browse-bar">
       <span class="browse-url" title="${esc(url)}">${esc(url)}</span>
-      <a href="${esc(url)}" target="_blank" rel="noopener" class="btn btn-sm">↗ Open tab</a>
-      <button class="btn btn-sm" onclick="document.getElementById('search-browse-pane').style.display='none'">✕ Close</button>
+      <a href="${esc(url)}" target="_blank" rel="noopener" class="btn btn-sm browse-open-btn">↗ New tab</a>
+      <button class="btn btn-sm" onclick="closeBrowsePane()">✕</button>
     </div>
-    <iframe src="${esc(url)}" class="browse-frame"
-      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
-      title="Browse"></iframe>
+    <iframe src="${esc(url)}" class="browse-frame" title="Browse"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"></iframe>
   `;
+}
+
+function closeBrowsePane() {
+  const pane        = document.getElementById('search-browse-pane');
+  const placeholder = document.getElementById('search-browse-placeholder');
+  if (pane) pane.style.display = 'none';
+  if (placeholder) placeholder.style.display = 'flex';
 }
 
 function renderSearchView(query = '') {
   const main = document.getElementById('main');
   if (!main) return;
-  main.innerHTML = `
-    <div class="search-page">
-      <div class="search-hero">
-        <div class="search-logo">
-          <svg width="36" height="36" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle;margin-right:.4rem">
-            <circle cx="64" cy="64" r="64" fill="#DE5833"/>
-            <circle cx="64" cy="57" r="30" fill="#fff"/>
-            <circle cx="72" cy="50" r="8" fill="#4A4A4A"/>
-            <circle cx="74" cy="48" r="3" fill="#fff"/>
-          </svg>
-          <span>DuckDuckGo Search</span>
+
+  const ddgLogo = `<svg width="20" height="20" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle;margin-right:.35rem;flex-shrink:0"><circle cx="64" cy="64" r="64" fill="#DE5833"/><circle cx="64" cy="57" r="30" fill="#fff"/><circle cx="72" cy="50" r="8" fill="#4A4A4A"/><circle cx="74" cy="48" r="3" fill="#fff"/></svg>`;
+
+  if (!query) {
+    // Home / empty state — centered like DDG homepage
+    main.innerHTML = `
+      <div class="ddg-home">
+        <div class="ddg-home-logo">
+          <svg width="80" height="80" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="64" cy="64" r="64" fill="#DE5833"/><circle cx="64" cy="57" r="30" fill="#fff"/><circle cx="72" cy="50" r="8" fill="#4A4A4A"/><circle cx="74" cy="48" r="3" fill="#fff"/></svg>
+          <span>DuckDuckGo</span>
         </div>
-        <form class="search-form" onsubmit="doSearch(event)">
-          <div class="search-input-wrap">
-            <input id="search-q" class="search-input" type="text" placeholder="Search the web…"
-              value="${esc(query)}" autocomplete="off" autofocus>
-            <button type="submit" class="search-btn">🔍 Search</button>
+        <form class="ddg-home-form" onsubmit="doSearch(event)">
+          <div class="ddg-home-input-wrap">
+            <input id="search-q" class="ddg-home-input" type="text" placeholder="Search the web privately…" autocomplete="off" autofocus>
+            <button type="submit" class="ddg-home-btn">Search</button>
           </div>
         </form>
-        ${query ? `<p class="search-hint">Results for <strong>${esc(query)}</strong> — click any result to browse here, or use ↗ to open in a new tab.</p>` : `<p class="search-hint">Search the web privately with DuckDuckGo.</p>`}
-      </div>
-
-      ${query ? `
-      <div class="search-two-col">
-        <div class="search-col-results">
-          <div id="search-results" class="search-results"><div class="search-loading">Loading…</div></div>
-          <div class="ddg-results-frame-wrap">
-            <div class="ddg-card-tag">Web Results</div>
-            <iframe src="/api/search/results?q=${encodeURIComponent(query)}"
-              class="ddg-results-frame" title="Web Results"></iframe>
-          </div>
-        </div>
-        <div class="search-col-browse">
-          <div id="search-browse-pane" class="search-browse-pane" style="display:none"></div>
-          <div id="search-browse-placeholder" class="search-browse-placeholder">
-            <div style="font-size:2rem;margin-bottom:.5rem">🌐</div>
-            <div>Click a search result to<br>browse it here</div>
-          </div>
-        </div>
-      </div>
-      ` : `<div id="search-results" class="search-results"></div>`}
-    </div>
-  `;
-
-  // When browse pane becomes visible, hide the placeholder
-  const pane = document.getElementById('search-browse-pane');
-  const placeholder = document.getElementById('search-browse-placeholder');
-  if (pane && placeholder) {
-    const obs = new MutationObserver(() => {
-      placeholder.style.display = pane.style.display === 'none' ? 'flex' : 'none';
-    });
-    obs.observe(pane, { attributes: true, attributeFilter: ['style'] });
+        <p class="ddg-home-tagline">Your privacy. Protected. Results from DuckDuckGo.</p>
+      </div>`;
+    return;
   }
 
-  if (query) fetchDDGAnswer(query);
+  // Results layout
+  main.innerHTML = `
+    <div class="ddg-results-page">
+      <div class="ddg-results-header">
+        <div class="ddg-results-logo" onclick="renderSearchView()" style="cursor:pointer" title="New search">
+          ${ddgLogo}<span>DuckDuckGo</span>
+        </div>
+        <form class="ddg-results-search-form" onsubmit="doSearch(event)">
+          <div class="ddg-results-input-wrap">
+            <input id="search-q" class="ddg-results-input" type="text"
+              value="${esc(query)}" autocomplete="off">
+            <button type="submit" class="ddg-results-btn">🔍</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="ddg-results-body">
+        <div class="ddg-results-left">
+          <div id="ddg-instant" class="ddg-instant-wrap"></div>
+          <div id="ddg-web" class="ddg-web-wrap">
+            <div class="ddg-web-loading">Searching…</div>
+          </div>
+        </div>
+        <div class="ddg-results-right">
+          <div id="search-browse-pane" class="search-browse-pane" style="display:none"></div>
+          <div id="search-browse-placeholder" class="search-browse-placeholder">
+            <div class="browse-ph-icon">🌐</div>
+            <div>Click any result to<br>preview it here</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  fetchDDGInstant(query);
+  fetchDDGResults(query);
 }
 
 async function doSearch(e) {
   e.preventDefault();
-  const q = document.getElementById('search-q').value.trim();
+  const q = (document.getElementById('search-q')?.value || '').trim();
   if (!q) return;
   renderSearchView(q);
 }
 
-async function fetchDDGAnswer(query) {
-  const el = document.getElementById('search-results');
+// Instant answer (Wikipedia summary, answer box, related topics)
+async function fetchDDGInstant(query) {
+  const el = document.getElementById('ddg-instant');
   if (!el) return;
   try {
-    const res  = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+    const res  = await fetch(`/api/search?q=${encodeURIComponent(query)}`, { credentials: 'include' });
     const data = await res.json();
+    let html   = '';
 
-    let html = '';
-
-    // Abstract (Wikipedia-style answer)
     if (data.AbstractText) {
       html += `
-        <div class="ddg-card ddg-abstract">
-          <div class="ddg-card-title">
-            ${data.AbstractSource ? `<a href="${esc(data.AbstractURL)}" target="_blank" rel="noopener">${esc(data.AbstractSource)}</a>` : 'Summary'}
-            ${data.Image ? `<img src="${esc('https://duckduckgo.com' + data.Image)}" class="ddg-thumb" alt="">` : ''}
+        <div class="ddg-ia-card">
+          ${data.Image ? `<img src="${esc('https://duckduckgo.com' + data.Image)}" class="ddg-ia-img" alt="">` : ''}
+          <div class="ddg-ia-body">
+            <div class="ddg-ia-source">
+              ${data.AbstractSource ? `<a href="${esc(data.AbstractURL)}" onclick="openBrowseUrl('${esc(data.AbstractURL)}');return false;" class="ddg-ia-source-link">${esc(data.AbstractSource)}</a>` : ''}
+            </div>
+            <p class="ddg-ia-text">${esc(data.AbstractText)}</p>
           </div>
-          <p>${esc(data.AbstractText)}</p>
         </div>`;
     }
-
-    // Answer box (e.g. calculations, quick facts)
     if (data.Answer) {
-      html += `
-        <div class="ddg-card ddg-answer">
-          <div class="ddg-card-tag">Answer</div>
-          <p class="ddg-answer-text">${esc(data.Answer)}</p>
-        </div>`;
+      html += `<div class="ddg-ia-card ddg-ia-answer"><span class="ddg-ia-answer-label">Answer</span><span class="ddg-ia-answer-val">${esc(data.Answer)}</span></div>`;
     }
-
-    // Definition
     if (data.Definition) {
-      html += `
-        <div class="ddg-card">
-          <div class="ddg-card-tag">Definition</div>
-          <p>${esc(data.Definition)}</p>
-          ${data.DefinitionSource ? `<a href="${esc(data.DefinitionURL)}" target="_blank" rel="noopener" class="ddg-source-link">Source: ${esc(data.DefinitionSource)} ↗</a>` : ''}
-        </div>`;
-    }
-
-    // Related topics — show ALL, including nested Topics arrays
-    const flatTopics = [];
-    for (const t of (data.RelatedTopics || [])) {
-      if (t.Text && t.FirstURL) flatTopics.push(t);
-      else if (t.Topics) t.Topics.forEach(st => st.Text && st.FirstURL && flatTopics.push(st));
-    }
-    if (flatTopics.length) {
-      html += `<div class="ddg-card"><div class="ddg-card-tag">Related Topics (${flatTopics.length})</div><ul class="ddg-topics">`;
-      for (const t of flatTopics) {
-        const icon = t.Icon && t.Icon.URL ? `<img src="https://duckduckgo.com${esc(t.Icon.URL)}" class="ddg-topic-icon" alt="">` : '';
-        html += `<li><a href="${esc(t.FirstURL)}" target="_blank" rel="noopener">${icon}${esc(t.Text)}</a></li>`;
-      }
-      html += `</ul></div>`;
-    }
-
-    // Infobox
-    if (data.Infobox && data.Infobox.content) {
-      const items = data.Infobox.content;
-      if (items.length) {
-        html += `<div class="ddg-card"><div class="ddg-card-tag">Info</div><dl class="ddg-infobox">`;
-        for (const item of items) {
-          html += `<dt>${esc(item.label)}</dt><dd>${esc(String(item.value))}</dd>`;
-        }
-        html += `</dl></div>`;
-      }
-    }
-
-    // Always show "See all results" button prominently
-    html += `
-      <div class="ddg-full-link-row">
-        <a href="https://duckduckgo.com/?q=${encodeURIComponent(query)}" target="_blank" rel="noopener" class="btn btn-primary ddg-full-btn">
-          🦆 See all results on DuckDuckGo ↗
-        </a>
-      </div>`;
-
-    if (!html.includes('ddg-card')) {
-      html = `<div class="ddg-card ddg-no-instant"><p>No instant answer available.</p></div>` + html;
+      html += `<div class="ddg-ia-card"><div class="ddg-ia-def-label">Definition</div><p>${esc(data.Definition)}</p>${data.DefinitionSource ? `<a href="${esc(data.DefinitionURL)}" onclick="openBrowseUrl('${esc(data.DefinitionURL)}');return false;" class="ddg-ia-more">Source: ${esc(data.DefinitionSource)} →</a>` : ''}</div>`;
     }
 
     el.innerHTML = html;
+  } catch (_) {}
+}
+
+// Full web results
+async function fetchDDGResults(query) {
+  const el = document.getElementById('ddg-web');
+  if (!el) return;
+  try {
+    const res  = await fetch(`/api/search/results?q=${encodeURIComponent(query)}`, { credentials: 'include' });
+    const data = await res.json();
+    const results = data.results || [];
+
+    if (!results.length) {
+      el.innerHTML = `<div class="ddg-no-results">No web results found. <a href="https://duckduckgo.com/?q=${encodeURIComponent(query)}" target="_blank" rel="noopener" class="ddg-ext-link">Try on DuckDuckGo ↗</a></div>`;
+      return;
+    }
+
+    el.innerHTML = results.map((r, i) => `
+      <div class="ddg-result" onclick="openBrowseUrl('${esc(r.url).replace(/'/g,"\\'")}')">
+        <div class="ddg-result-meta">
+          <img class="ddg-result-favicon" src="${esc(r.favicon)}" alt="" loading="lazy"
+            onerror="this.style.display='none'">
+          <span class="ddg-result-displayurl">${esc(r.displayUrl)}</span>
+          <a href="${esc(r.url)}" target="_blank" rel="noopener" class="ddg-result-opentab"
+            onclick="event.stopPropagation()" title="Open in new tab">↗</a>
+        </div>
+        <a class="ddg-result-title" href="${esc(r.url)}"
+          onclick="openBrowseUrl('${esc(r.url).replace(/'/g,"\\'")}');return false;">${esc(r.title)}</a>
+        ${r.snippet ? `<p class="ddg-result-snippet">${esc(r.snippet)}</p>` : ''}
+      </div>`).join('');
+
   } catch (err) {
-    el.innerHTML = `
-      <div class="ddg-card ddg-no-instant">
-        <p>Couldn't fetch instant answer. <a href="https://duckduckgo.com/?q=${encodeURIComponent(query)}" target="_blank" rel="noopener" class="search-full-link">Search on DuckDuckGo ↗</a></p>
-      </div>`;
+    if (el) el.innerHTML = `<div class="ddg-no-results">Couldn't load results. <a href="https://duckduckgo.com/?q=${encodeURIComponent(query)}" target="_blank" rel="noopener" class="ddg-ext-link">Search on DuckDuckGo ↗</a></div>`;
   }
 }
 
