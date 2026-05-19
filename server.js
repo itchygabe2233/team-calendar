@@ -827,30 +827,33 @@ app.delete('/api/admin/users/:id/strike', requireRole('owner'), a(async (req, re
 }));
 
 // ─────────────────────────────────────────────
-// AI HOMEWORK SOLVER  (OpenAI GPT-4o vision)
+// AI HOMEWORK SOLVER  (Google Gemini Flash — free tier)
 // ─────────────────────────────────────────────
 
-function callOpenAI(base64Image, prompt) {
+function callGemini(base64Image, mimeType, prompt) {
   return new Promise((resolve, reject) => {
-    if (!process.env.OPENAI_API_KEY)
-      return reject(new Error('OPENAI_API_KEY is not set in Railway environment variables'));
+    if (!process.env.GEMINI_API_KEY)
+      return reject(new Error('GEMINI_API_KEY is not set in Railway environment variables'));
 
     const payload = JSON.stringify({
-      model: 'gpt-4o',
-      max_tokens: 2048,
-      messages: [{ role: 'user', content: [
-        { type: 'text', text: prompt },
-        { type: 'image_url', image_url: { url: base64Image, detail: 'high' } }
-      ]}]
+      contents: [{
+        parts: [
+          { text: prompt },
+          { inline_data: { mime_type: mimeType || 'image/jpeg', data: base64Image } }
+        ]
+      }],
+      generationConfig: { maxOutputTokens: 2048, temperature: 0.2 }
     });
 
+    const key  = process.env.GEMINI_API_KEY;
+    const path = `/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+
     const req = https.request({
-      hostname: 'api.openai.com',
-      path:     '/v1/chat/completions',
-      method:   'POST',
+      hostname: 'generativelanguage.googleapis.com',
+      path,
+      method:  'POST',
       headers: {
         'Content-Type':   'application/json',
-        'Authorization':  `Bearer ${process.env.OPENAI_API_KEY}`,
         'Content-Length': Buffer.byteLength(payload),
       }
     }, r => {
@@ -860,7 +863,7 @@ function callOpenAI(base64Image, prompt) {
         try {
           const data = JSON.parse(body);
           if (data.error) return reject(new Error(data.error.message));
-          const text = data.choices?.[0]?.message?.content;
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
           if (!text) return reject(new Error('Empty AI response'));
           resolve(text);
         } catch (e) { reject(e); }
@@ -876,6 +879,10 @@ app.post('/api/ai/homework', requireAuth, a(async (req, res) => {
   const { image } = req.body || {};
   if (!image || !image.startsWith('data:image'))
     return res.status(400).json({ error: 'A valid image is required (data URL)' });
+
+  // Split data URL into mime type + raw base64
+  const [header, base64Data] = image.split(',');
+  const mimeType = header.match(/data:([^;]+)/)?.[1] || 'image/jpeg';
 
   const prompt = `You are an expert homework tutor. Carefully read every detail in this homework image and solve it completely.
 
@@ -899,7 +906,7 @@ A short 4-6 word title for this assignment (e.g. "Chapter 5 Algebra Review").
 Be thorough and educational. If there are multiple questions, solve each one.`;
 
   try {
-    const solution = await callOpenAI(image, prompt);
+    const solution = await callGemini(base64Data, mimeType, prompt);
     res.json({ solution });
   } catch (e) {
     const status = e.message.includes('API_KEY') ? 503 : 502;
