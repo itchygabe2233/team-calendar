@@ -707,6 +707,30 @@ app.delete('/api/tickets/:id', requireRole('owner'), a(async (req, res) => {
 }));
 
 // ─────────────────────────────────────────────
+// SEARCH HISTORY (admin/mod)
+// ─────────────────────────────────────────────
+app.get('/api/admin/search-history', requireRole('owner', 'mod'), a(async (req, res) => {
+  const rows = await pool.q(`
+    SELECT sh.id, sh.query, sh.created_at, u.username, u.role
+    FROM   search_history sh
+    LEFT JOIN users u ON u.id = sh.user_id
+    ORDER  BY sh.created_at DESC
+    LIMIT  500
+  `);
+  res.json(rows);
+}));
+
+app.delete('/api/admin/search-history/:id', requireRole('owner'), a(async (req, res) => {
+  await pool.run('DELETE FROM search_history WHERE id=$1', [req.params.id]);
+  res.json({ success: true });
+}));
+
+app.delete('/api/admin/search-history', requireRole('owner'), a(async (req, res) => {
+  await pool.run('DELETE FROM search_history');
+  res.json({ success: true });
+}));
+
+// ─────────────────────────────────────────────
 // CUSTOM ROLES
 // ─────────────────────────────────────────────
 app.get('/api/custom-roles', requireAuth, a(async (req, res) => {
@@ -756,14 +780,75 @@ app.delete('/api/custom-roles/:id', requireRole('owner'), a(async (req, res) => 
 }));
 
 // ─────────────────────────────────────────────
-// SPA fallback
+// GAME PROXY  — fetches game HTML server-side, injects auth script
 // ─────────────────────────────────────────────
+
+// Helper: fetch a URL and return the body as a string
+function fetchText(url) {
+  return new Promise((resolve, reject) => {
+    const mod = url.startsWith('https') ? https : require('http');
+    mod.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (r) => {
+      // Follow redirects (up to 3)
+      if ([301, 302, 303, 307, 308].includes(r.statusCode) && r.headers.location) {
+        return fetchText(r.headers.location).then(resolve).catch(reject);
+      }
+      let body = '';
+      r.on('data', c => body += c);
+      r.on('end', () => resolve(body));
+    }).on('error', reject);
+  });
+}
+
+// /play/:gameId?url=<encoded cdn url>  — no auth needed so it loads in new tab
+app.get('/play/:gameId', a(async (req, res) => {
+  const rawUrl = req.query.url;
+  if (!rawUrl) return res.status(400).send('<h2>Missing game URL</h2>');
+
+  try {
+    let html = await fetchText(rawUrl);
+
+    // Strip the anti-embed obfuscated block (large self-invoking function at the top)
+    // It's always a long eval/atob-based script injected by the CDN
+    html = html.replace(/<script[^>]*>[^<]{200,}<\/script>/g, (match) => {
+      // Keep scripts that look like real game code (contain canvas/phaser/etc)
+      // Remove ones that are pure obfuscation (atob, charCodeAt spam)
+      if (/atob|charCodeAt|fromCharCode/.test(match) && !/phaser|createjs|canvas/i.test(match)) {
+        return '';
+      }
+      return match;
+    });
+
+    // Inject gn-math's own authorization script (same one they use)
+    html = html.replace(/<\/html>/i,
+      '<script src="https://cdn.r9x.in/ailogic_gn-math.dev_obf.js"></script></html>');
+
+    // If no </html>, just append
+    if (!html.includes('cdn.r9x.in')) {
+      html += '<script src="https://cdn.r9x.in/ailogic_gn-math.dev_obf.js"></script>';
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.send(html);
+  } catch (e) {
+    res.status(502).send('<h2>Could not load game. Try again later.</h2>');
+  }
+}));
+
 // ─────────────────────────────────────────────
 // SEARCH PROXY  (avoids browser CORS block on DuckDuckGo)
 // ─────────────────────────────────────────────
 app.get('/api/search', requireAuth, a(async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.status(400).json({ error: 'Query required' });
+
+  // Record search in history
+  try {
+    await pool.run(
+      'INSERT INTO search_history (user_id, query) VALUES ($1, $2)',
+      [req.user.id, q]
+    );
+  } catch (_) {}
 
   const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skip_disambig=1`;
 

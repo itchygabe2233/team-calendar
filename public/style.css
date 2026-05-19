@@ -1008,6 +1008,9 @@ tr:hover td { background: #fafafa; }
 .game-card-recent .game-card-img { padding-top: 70%; }
 .game-card-plays { font-size: .68rem; color: var(--muted); padding: 0 .5rem .35rem; }
 
+.ddg-topic-icon { width: 16px; height: 16px; object-fit: cover; border-radius: 2px; margin-right: .3rem; vertical-align: middle; }
+.ddg-full-btn { width: 100%; justify-content: center; margin-top: .25rem; }
+
 /* Game modal (wider) */
 .game-modal { width: min(95vw, 900px); max-height: 90vh; display: flex; flex-direction: column; padding: 0; }
 .game-modal-head { padding: .7rem 1rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }

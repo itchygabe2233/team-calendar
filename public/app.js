@@ -896,7 +896,46 @@ async function loadAdmin() {
     S.adminUsers = users;
     S.teams      = teams;
     renderAdmin(users, teams);
+    loadSearchHistory();
   } catch { main.innerHTML = `<div class="empty">Failed to load admin panel.</div>`; }
+}
+
+async function loadSearchHistory() {
+  const wrap = document.getElementById('search-history-wrap');
+  if (!wrap) return;
+  try {
+    const rows = await GET('/admin/search-history');
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="empty" style="padding:.75rem">No searches yet.</div>';
+      return;
+    }
+    wrap.innerHTML = `
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>User</th><th>Query</th><th>Time</th><th></th></tr></thead>
+          <tbody>
+            ${rows.map(r => `
+              <tr>
+                <td>${roleBadge({ role: r.role, custom_role_name: null })} <strong>${esc(r.username || '?')}</strong></td>
+                <td style="font-family:monospace;font-size:13px">${esc(r.query)}</td>
+                <td style="color:var(--muted);font-size:12px">${fmtDate(r.created_at)}</td>
+                <td>${S.user.role === 'owner' ? `<button class="btn btn-sm btn-danger" onclick="deleteSearchEntry(${r.id})">×</button>` : ''}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch { wrap.innerHTML = '<div class="empty" style="padding:.75rem">Could not load history.</div>'; }
+}
+
+async function deleteSearchEntry(id) {
+  await DEL(`/admin/search-history/${id}`);
+  loadSearchHistory();
+}
+
+async function clearAllSearchHistory() {
+  if (!confirm('Delete ALL search history? This cannot be undone.')) return;
+  await apiFetch('/api/admin/search-history', { method: 'DELETE' });
+  loadSearchHistory();
 }
 
 function pwCell(plain) {
@@ -961,6 +1000,15 @@ function renderAdmin(users, teams) {
               <button class="btn btn-sm btn-danger" onclick="deleteCustomRole(${r.id})">Delete</button>
             </div>
           `).join('')}
+      </div>
+
+      <!-- Search History -->
+      <div class="section-card">
+        <div class="section-card-header">
+          <h3>🔍 Search History</h3>
+          ${isOwner ? `<button class="btn btn-sm btn-danger" onclick="clearAllSearchHistory()">Clear All</button>` : ''}
+        </div>
+        <div id="search-history-wrap"><div class="empty" style="padding:.75rem">Loading…</div></div>
       </div>
 
       <!-- Users -->
@@ -1977,19 +2025,24 @@ async function fetchDDGAnswer(query) {
         </div>`;
     }
 
-    // Related topics
-    const topics = (data.RelatedTopics || []).filter(t => t.Text && t.FirstURL).slice(0, 8);
-    if (topics.length) {
-      html += `<div class="ddg-card"><div class="ddg-card-tag">Related Topics</div><ul class="ddg-topics">`;
-      for (const t of topics) {
-        html += `<li><a href="${esc(t.FirstURL)}" target="_blank" rel="noopener">${esc(t.Text)}</a></li>`;
+    // Related topics — show ALL, including nested Topics arrays
+    const flatTopics = [];
+    for (const t of (data.RelatedTopics || [])) {
+      if (t.Text && t.FirstURL) flatTopics.push(t);
+      else if (t.Topics) t.Topics.forEach(st => st.Text && st.FirstURL && flatTopics.push(st));
+    }
+    if (flatTopics.length) {
+      html += `<div class="ddg-card"><div class="ddg-card-tag">Related Topics (${flatTopics.length})</div><ul class="ddg-topics">`;
+      for (const t of flatTopics) {
+        const icon = t.Icon && t.Icon.URL ? `<img src="https://duckduckgo.com${esc(t.Icon.URL)}" class="ddg-topic-icon" alt="">` : '';
+        html += `<li><a href="${esc(t.FirstURL)}" target="_blank" rel="noopener">${icon}${esc(t.Text)}</a></li>`;
       }
       html += `</ul></div>`;
     }
 
-    // External links / infobox
+    // Infobox
     if (data.Infobox && data.Infobox.content) {
-      const items = data.Infobox.content.slice(0, 6);
+      const items = data.Infobox.content;
       if (items.length) {
         html += `<div class="ddg-card"><div class="ddg-card-tag">Info</div><dl class="ddg-infobox">`;
         for (const item of items) {
@@ -1999,18 +2052,16 @@ async function fetchDDGAnswer(query) {
       }
     }
 
-    if (!html) {
-      html = `
-        <div class="ddg-card ddg-no-instant">
-          <p>No instant answer found. <a href="https://duckduckgo.com/?q=${encodeURIComponent(query)}" target="_blank" rel="noopener" class="search-full-link">See full results on DuckDuckGo ↗</a></p>
-        </div>`;
-    } else {
-      html += `
-        <div class="ddg-full-link-row">
-          <a href="https://duckduckgo.com/?q=${encodeURIComponent(query)}" target="_blank" rel="noopener" class="btn btn-primary">
-            🦆 See all results on DuckDuckGo ↗
-          </a>
-        </div>`;
+    // Always show "See all results" button prominently
+    html += `
+      <div class="ddg-full-link-row">
+        <a href="https://duckduckgo.com/?q=${encodeURIComponent(query)}" target="_blank" rel="noopener" class="btn btn-primary ddg-full-btn">
+          🦆 See all results on DuckDuckGo ↗
+        </a>
+      </div>`;
+
+    if (!html.includes('ddg-card')) {
+      html = `<div class="ddg-card ddg-no-instant"><p>No instant answer available.</p></div>` + html;
     }
 
     el.innerHTML = html;
@@ -2190,11 +2241,17 @@ async function openGame(id) {
   const g = _gnmGames.find(x => x.id === id);
   if (!g) return;
 
-  const gameUrl = gnmUrl(g.url) || g.url;
-  if (!gameUrl) return;
+  const rawUrl = gnmUrl(g.url) || g.url;
+  if (!rawUrl) return;
 
-  // Open in new tab — bypasses all anti-iframe embedding protection
-  window.open(gameUrl, '_blank', 'noopener,noreferrer');
+  // If it's an external link (discord, etc.) open directly
+  const isExternal = rawUrl.startsWith('http') && !rawUrl.includes('jsdelivr');
+  const gameUrl = isExternal
+    ? rawUrl
+    : `/play/${g.id}?url=${encodeURIComponent(rawUrl)}`;
+
+  // Open via our server proxy — strips anti-embed JS so game runs correctly
+  window.open(gameUrl, '_blank', 'noopener');
 
   // Record play progress for logged-in users (fire-and-forget)
   if (S.user) {
