@@ -833,12 +833,12 @@ app.delete('/api/admin/users/:id/strike', requireRole('owner'), a(async (req, re
 function callPollinations(dataUrl, prompt) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify({
-      model: 'openai',
+      model: 'openai-large',
       messages: [{
         role: 'user',
         content: [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: dataUrl } }
+          { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }
         ]
       }],
       max_tokens: 2048
