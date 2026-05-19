@@ -1946,6 +1946,31 @@ async function deleteTicketAdmin(id) {
 // ================================================================
 // SEARCH (DuckDuckGo)
 // ================================================================
+
+// Listen for link-click messages from the /api/search/results iframe
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'ddg-link') {
+    openBrowseUrl(e.data.url);
+  }
+});
+
+function openBrowseUrl(url) {
+  // Show a browse pane inside the search page
+  let pane = document.getElementById('search-browse-pane');
+  if (!pane) return;
+  pane.style.display = 'flex';
+  pane.innerHTML = `
+    <div class="browse-bar">
+      <span class="browse-url" title="${esc(url)}">${esc(url)}</span>
+      <a href="${esc(url)}" target="_blank" rel="noopener" class="btn btn-sm">↗ Open tab</a>
+      <button class="btn btn-sm" onclick="document.getElementById('search-browse-pane').style.display='none'">✕ Close</button>
+    </div>
+    <iframe src="${esc(url)}" class="browse-frame"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
+      title="Browse"></iframe>
+  `;
+}
+
 function renderSearchView(query = '') {
   const main = document.getElementById('main');
   if (!main) return;
@@ -1968,13 +1993,41 @@ function renderSearchView(query = '') {
             <button type="submit" class="search-btn">🔍 Search</button>
           </div>
         </form>
-        ${query ? `<p class="search-hint">Showing instant answer for <strong>${esc(query)}</strong> — <a href="https://duckduckgo.com/?q=${encodeURIComponent(query)}" target="_blank" rel="noopener" class="search-full-link">Open full results ↗</a></p>` : `<p class="search-hint">Search the web privately with DuckDuckGo.</p>`}
+        ${query ? `<p class="search-hint">Results for <strong>${esc(query)}</strong> — click any result to browse here, or use ↗ to open in a new tab.</p>` : `<p class="search-hint">Search the web privately with DuckDuckGo.</p>`}
       </div>
-      <div id="search-results" class="search-results">
-        ${query ? '<div class="search-loading">Loading…</div>' : ''}
+
+      ${query ? `
+      <div class="search-two-col">
+        <div class="search-col-results">
+          <div id="search-results" class="search-results"><div class="search-loading">Loading…</div></div>
+          <div class="ddg-results-frame-wrap">
+            <div class="ddg-card-tag">Web Results</div>
+            <iframe src="/api/search/results?q=${encodeURIComponent(query)}"
+              class="ddg-results-frame" title="Web Results"></iframe>
+          </div>
+        </div>
+        <div class="search-col-browse">
+          <div id="search-browse-pane" class="search-browse-pane" style="display:none"></div>
+          <div id="search-browse-placeholder" class="search-browse-placeholder">
+            <div style="font-size:2rem;margin-bottom:.5rem">🌐</div>
+            <div>Click a search result to<br>browse it here</div>
+          </div>
+        </div>
       </div>
+      ` : `<div id="search-results" class="search-results"></div>`}
     </div>
   `;
+
+  // When browse pane becomes visible, hide the placeholder
+  const pane = document.getElementById('search-browse-pane');
+  const placeholder = document.getElementById('search-browse-placeholder');
+  if (pane && placeholder) {
+    const obs = new MutationObserver(() => {
+      placeholder.style.display = pane.style.display === 'none' ? 'flex' : 'none';
+    });
+    obs.observe(pane, { attributes: true, attributeFilter: ['style'] });
+  }
+
   if (query) fetchDDGAnswer(query);
 }
 
@@ -2250,8 +2303,14 @@ async function openGame(id) {
     ? rawUrl
     : `/play/${g.id}?url=${encodeURIComponent(rawUrl)}`;
 
-  // Open via our server proxy — strips anti-embed JS so game runs correctly
-  window.open(gameUrl, '_blank', 'noopener');
+  // Open as about:blank tab so the URL bar stays clean, content loaded via iframe
+  const w = window.open('', '_blank');
+  if (w) {
+    const name = esc(g.name || 'Game');
+    w.document.open();
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${name}</title><style>*{margin:0;padding:0}html,body{width:100%;height:100%;overflow:hidden;background:#000}iframe{display:block;width:100%;height:100%;border:none}</style></head><body><iframe src="${gameUrl}" allowfullscreen allow="autoplay;fullscreen;pointer-lock" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-pointer-lock allow-top-navigation"></iframe></body></html>`);
+    w.document.close();
+  }
 
   // Record play progress for logged-in users (fire-and-forget)
   if (S.user) {

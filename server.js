@@ -871,6 +871,59 @@ app.get('/api/search', requireAuth, a(async (req, res) => {
   });
 }));
 
+// Full DDG results proxy — fetches html.duckduckgo.com, rewrites links to open in new tab
+app.get('/api/search/results', requireAuth, a(async (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q) return res.status(400).send('<p>No query</p>');
+
+  try {
+    let html = await fetchText(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`);
+
+    // Make all result links open in new tab and go directly to the target URL
+    // DDG HTML wraps links through /l/?uddg=<encoded url> — decode them
+    html = html.replace(/href="\/l\/\?(?:[^"]*&)?uddg=([^"&]+)[^"]*"/g, (_, enc) => {
+      try { return `href="${decodeURIComponent(enc)}" target="_blank" rel="noopener"`; }
+      catch { return `href="#" target="_blank"`; }
+    });
+
+    // Any remaining relative DDG links → absolute
+    html = html.replace(/href="\//g, 'href="https://duckduckgo.com/');
+
+    // Strip DDG header/nav/footer, keep just the results
+    const resultsMatch = html.match(/<div[^>]+id="links"[^>]*>([\s\S]*?)<\/div>\s*<div[^>]+class="[^"]*nav[^"]*"/);
+    const resultsHtml = resultsMatch ? resultsMatch[1] : html;
+
+    // Wrap in minimal styled page with click-intercept script (sends clicked URL to parent)
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8">
+      <style>
+        body{font-family:system-ui,sans-serif;margin:0;padding:1rem;background:#fff;color:#222;font-size:14px}
+        .result{margin-bottom:1.4rem}
+        .result-title a{font-size:16px;font-weight:600;color:#1a0dab;text-decoration:none}
+        .result-title a:hover{text-decoration:underline}
+        .result-url{font-size:12px;color:#006621;margin:.15rem 0}
+        .result-snippet{color:#545454;line-height:1.5}
+        .no-results{color:#888;padding:2rem;text-align:center}
+        a{cursor:pointer}
+      </style>
+      <script>
+        document.addEventListener('click', function(e) {
+          const a = e.target.closest('a[href]');
+          if (!a) return;
+          const href = a.href;
+          // Let DuckDuckGo search nav links pass through (go to next page, etc.)
+          if (href.includes('duckduckgo.com/html')) { return; }
+          // Everything else → open in parent browse pane
+          e.preventDefault();
+          window.parent.postMessage({ type: 'ddg-link', url: href }, '*');
+        });
+      <\/script>
+      </head><body>${resultsHtml}<p style="color:#aaa;font-size:11px;text-align:center;padding:1rem 0">Results from DuckDuckGo — click any result to browse within TeamCal</p></body></html>`);
+  } catch (e) {
+    res.status(502).send('<p style="font-family:sans-serif;padding:1rem">Could not load results. Try again.</p>');
+  }
+}));
+
 // ─────────────────────────────────────────────
 // GAME PROGRESS
 // ─────────────────────────────────────────────
