@@ -1941,8 +1941,7 @@ async function fetchDDGAnswer(query) {
   const el = document.getElementById('search-results');
   if (!el) return;
   try {
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-    const res  = await fetch(url);
+    const res  = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
     const data = await res.json();
 
     let html = '';

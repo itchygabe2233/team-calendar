@@ -1,5 +1,6 @@
 const express      = require('express');
 const path         = require('path');
+const https        = require('https');
 const cookieParser = require('cookie-parser');
 const jwt          = require('jsonwebtoken');
 const bcrypt       = require('bcryptjs');
@@ -757,6 +758,34 @@ app.delete('/api/custom-roles/:id', requireRole('owner'), a(async (req, res) => 
 // ─────────────────────────────────────────────
 // SPA fallback
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// SEARCH PROXY  (avoids browser CORS block on DuckDuckGo)
+// ─────────────────────────────────────────────
+app.get('/api/search', requireAuth, a(async (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q) return res.status(400).json({ error: 'Query required' });
+
+  const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skip_disambig=1`;
+
+  await new Promise((resolve, reject) => {
+    https.get(url, { headers: { 'User-Agent': 'TeamCal/1.0' } }, (ddgRes) => {
+      let body = '';
+      ddgRes.on('data', chunk => body += chunk);
+      ddgRes.on('end', () => {
+        try {
+          res.json(JSON.parse(body));
+        } catch {
+          res.status(502).json({ error: 'Bad response from search provider' });
+        }
+        resolve();
+      });
+    }).on('error', err => {
+      res.status(502).json({ error: 'Search provider unavailable' });
+      resolve();
+    });
+  });
+}));
+
 // ─────────────────────────────────────────────
 // GAME PROGRESS
 // ─────────────────────────────────────────────
