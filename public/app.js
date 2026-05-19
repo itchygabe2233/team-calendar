@@ -401,6 +401,7 @@ function renderSidebar() {
       <button class="nav-btn ${S.view==='board'    ?'active':''}" onclick="switchView('board')">📌 Board</button>
       <button class="nav-btn ${S.view==='search'   ?'active':''}" onclick="switchView('search')">🔍 Search</button>
       <button class="nav-btn ${S.view==='games'    ?'active':''}" onclick="switchView('games')">🎮 Games</button>
+      <button class="nav-btn ${S.view==='homework' ?'active':''}" onclick="switchView('homework')">🤖 AI Homework</button>
       <button class="nav-btn ${S.view==='tickets'  ?'active':''}" onclick="switchView('tickets')">
         🎫 Tickets
         <span id="ticket-badge" class="badge" style="display:none"></span>
@@ -476,6 +477,7 @@ async function switchView(view) {
   else if (view === 'board')    await loadBoard();
   else if (view === 'search')   renderSearchView();
   else if (view === 'games')    await loadGames();
+  else if (view === 'homework') renderHomeworkView();
 }
 
 function toggleTeam(id) {
@@ -1029,11 +1031,16 @@ function renderAdmin(users, teams) {
             <thead>
               <tr>
                 <th>Username</th><th>Password</th><th>Role</th><th>Team</th>
-                <th>Status</th><th>IP Address</th><th>Joined</th><th>Actions</th>
+                <th>Status</th><th>Strikes</th><th>IP Address</th><th>Joined</th><th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              ${users.map(u => `
+              ${users.map(u => {
+                const strikes = u.strikes || 0;
+                const strikesHtml = strikes > 0
+                  ? `<span class="strike-count">${'🔴'.repeat(Math.min(strikes,3))} ${strikes}</span>`
+                  : '<span class="strike-none">—</span>';
+                return `
                 <tr>
                   <td style="font-weight:500">${esc(u.username)}</td>
                   <td>${pwCell(u.plain_password)}</td>
@@ -1042,23 +1049,57 @@ function renderAdmin(users, teams) {
                   <td>${u.banned
                     ? '<span class="status-pill rejected">Banned</span>'
                     : '<span class="status-pill approved">Active</span>'}</td>
+                  <td>${strikesHtml}</td>
                   <td style="color:var(--muted);font-size:12px;font-family:monospace">${esc(u.ip_address)}</td>
                   <td style="color:var(--muted);font-size:12px">${fmtDate(u.created_at)}</td>
                   <td>
                     ${u.id !== S.user.id
-                      ? `<div class="flex-row" style="gap:.3rem">
+                      ? `<div class="flex-row" style="gap:.3rem;flex-wrap:wrap">
                            <button class="btn btn-sm" onclick="openEditUser(${u.id})">Edit</button>
                            <button class="btn btn-sm" onclick="openResetPw(${u.id})">Reset PW</button>
+                           <button class="btn btn-sm" style="background:#fde8e8;border-color:#e8b4b4;color:#8b2222" onclick="addStrike(${u.id})">⚠️ Strike</button>
+                           ${isOwner && strikes > 0 ? `<button class="btn btn-sm" onclick="removeStrike(${u.id})">↩ −Strike</button>` : ''}
                            ${isOwner ? `<button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})">Del</button>` : ''}
                          </div>`
                       : '<span style="color:var(--muted);font-size:12px">You</span>'}
                   </td>
-                </tr>`).join('')}
+                </tr>`;
+              }).join('')}
             </tbody>
           </table>
         </div>
       </div>
     </div>`;
+}
+
+// ── Strike system ────────────────────────────────
+async function addStrike(userId) {
+  const reason = prompt('Reason for strike (optional):');
+  if (reason === null) return; // cancelled
+  try {
+    const data = await POST(`/admin/users/${userId}/strike`, { reason: reason || null });
+    const msg = data.auto_banned
+      ? `Strike added. User now has ${data.strikes} strikes and has been auto-banned.`
+      : `Strike added. User now has ${data.strikes}/3 strikes.`;
+    toast(msg, data.auto_banned ? 'error' : 'info', 4000);
+    // Refresh admin view
+    const [users, teams] = await Promise.all([GET('/admin/users'), GET('/teams')]);
+    S.adminUsers = users; S.teams = teams;
+    renderAdmin(users, teams);
+    loadSearchHistory();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function removeStrike(userId) {
+  if (!confirm('Remove the most recent strike from this user?')) return;
+  try {
+    const data = await DEL(`/admin/users/${userId}/strike`);
+    toast(`Strike removed. User now has ${data.strikes}/3 strikes.`, 'success');
+    const [users, teams] = await Promise.all([GET('/admin/users'), GET('/teams')]);
+    S.adminUsers = users; S.teams = teams;
+    renderAdmin(users, teams);
+    loadSearchHistory();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ── Team CRUD ────────────────────────────────────
@@ -2106,6 +2147,206 @@ async function fetchDDGResults(query) {
 }
 
 // ================================================================
+// AI HOMEWORK SOLVER
+// ================================================================
+let _hwImageBase64 = null;
+let _hwSolution    = null;
+let _hwTeamId      = '';
+let _hwDueDate     = '';
+let _hwTitle       = 'AI Homework';
+
+function renderHomeworkView() {
+  const main = document.getElementById('main');
+  if (!main) return;
+  const teamOpts = S.teams.map(t =>
+    `<option value="${t.id}">${esc(t.name)}</option>`
+  ).join('');
+
+  main.innerHTML = `
+    <div class="hw-page">
+      <div class="hw-header">
+        <div class="hw-title">🤖 AI Homework Solver</div>
+        <p class="hw-subtitle">Upload a photo or scan of your homework — AI reads it and solves it step by step.</p>
+      </div>
+
+      <!-- Step 1: Upload -->
+      <div id="hw-step1" class="hw-step">
+        <div class="hw-dropzone" id="hw-drop"
+          onclick="document.getElementById('hw-file').click()"
+          ondragover="event.preventDefault();this.classList.add('drag-over')"
+          ondragleave="this.classList.remove('drag-over')"
+          ondrop="hwDrop(event)">
+          <div class="hw-drop-icon">📷</div>
+          <div class="hw-drop-text">Drop homework image here</div>
+          <div class="hw-drop-hint">or click to browse — JPG, PNG, PDF scan, etc.</div>
+          <input type="file" id="hw-file" accept="image/*" style="display:none" onchange="hwFileSelected(this)">
+        </div>
+      </div>
+
+      <!-- Step 2: Confirm team/date (hidden until image chosen) -->
+      <div id="hw-step2" class="hw-step" style="display:none">
+        <div class="hw-step2-grid">
+          <div class="hw-preview-col">
+            <img id="hw-img-preview" class="hw-img-preview" alt="Homework preview">
+            <button class="btn btn-sm" onclick="hwReset()" style="margin-top:.5rem">↩ Change image</button>
+          </div>
+          <div class="hw-form-col">
+            <h3 style="margin-bottom:1rem">Before solving…</h3>
+            <div class="form-group">
+              <label>Which team is this for?</label>
+              <select id="hw-team-sel">
+                <option value="">— No team —</option>
+                ${teamOpts}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Due date</label>
+              <input type="date" id="hw-due-input" value="${todayISO()}">
+            </div>
+            <button class="btn btn-primary hw-solve-btn" onclick="hwSolve()">
+              🤖 Solve with AI
+            </button>
+            <p style="font-size:.75rem;color:var(--muted);margin-top:.6rem">Requires OPENAI_API_KEY set in Railway settings.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3: Loading -->
+      <div id="hw-step3" class="hw-step" style="display:none">
+        <div class="hw-loading-state">
+          <div class="hw-spinner"></div>
+          <div class="hw-loading-msg">AI is reading and solving your homework…</div>
+          <div class="hw-loading-sub">Usually takes 10–30 seconds</div>
+        </div>
+      </div>
+
+      <!-- Step 4: Result -->
+      <div id="hw-step4" class="hw-step" style="display:none">
+        <div class="hw-result-bar">
+          <button class="btn" onclick="hwReset()">↩ Solve another</button>
+          <button class="btn btn-primary" id="hw-cal-btn" onclick="hwAddToCalendar()">📅 Add to Calendar</button>
+        </div>
+        <div id="hw-result-content" class="hw-result-content"></div>
+      </div>
+    </div>`;
+
+  // Reset state if returning to the view
+  if (!_hwImageBase64) hwReset();
+}
+
+function hwDrop(e) {
+  e.preventDefault();
+  document.getElementById('hw-drop').classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) hwLoadFile(f);
+  else toast('Please drop an image file', 'error');
+}
+
+function hwFileSelected(input) {
+  const f = input.files[0];
+  if (f) hwLoadFile(f);
+}
+
+function hwLoadFile(file) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    _hwImageBase64 = ev.target.result;
+    const preview = document.getElementById('hw-img-preview');
+    if (preview) preview.src = _hwImageBase64;
+    document.getElementById('hw-step1').style.display = 'none';
+    document.getElementById('hw-step2').style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+}
+
+function hwReset() {
+  _hwImageBase64 = null;
+  _hwSolution    = null;
+  _hwTitle       = 'AI Homework';
+  const s1 = document.getElementById('hw-step1');
+  const s2 = document.getElementById('hw-step2');
+  const s3 = document.getElementById('hw-step3');
+  const s4 = document.getElementById('hw-step4');
+  if (s1) s1.style.display = 'block';
+  if (s2) s2.style.display = 'none';
+  if (s3) s3.style.display = 'none';
+  if (s4) s4.style.display = 'none';
+  const fi = document.getElementById('hw-file');
+  if (fi) fi.value = '';
+}
+
+async function hwSolve() {
+  if (!_hwImageBase64) return;
+  _hwTeamId  = document.getElementById('hw-team-sel')?.value  || '';
+  _hwDueDate = document.getElementById('hw-due-input')?.value || todayISO();
+
+  document.getElementById('hw-step2').style.display = 'none';
+  document.getElementById('hw-step3').style.display = 'flex';
+
+  try {
+    const res  = await fetch('/api/ai/homework', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: _hwImageBase64 })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'AI error');
+
+    _hwSolution = data.solution;
+    // Extract suggested title
+    const m = data.solution.match(/##\s*Suggested Title\s*\n+([^\n#]+)/i);
+    if (m) _hwTitle = m[1].trim().replace(/^[*_\s]+|[*_\s]+$/g, '');
+
+    document.getElementById('hw-step3').style.display = 'none';
+    document.getElementById('hw-step4').style.display = 'block';
+    document.getElementById('hw-result-content').innerHTML = hwRenderMarkdown(data.solution);
+  } catch (err) {
+    document.getElementById('hw-step3').style.display = 'none';
+    document.getElementById('hw-step2').style.display = 'block';
+    toast('AI error: ' + err.message, 'error');
+  }
+}
+
+async function hwAddToCalendar() {
+  const btn = document.getElementById('hw-cal-btn');
+  try {
+    await POST('/assignments', {
+      title:       _hwTitle || 'AI Homework',
+      description: (_hwSolution || '').slice(0, 3000),
+      due_date:    _hwDueDate || todayISO(),
+      team_id:     _hwTeamId || null,
+    });
+    toast('Added to calendar! ✅', 'success');
+    if (btn) { btn.textContent = '✅ Added!'; btn.disabled = true; }
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+// Simple markdown → HTML (safe — input is AI output, not user input)
+function hwRenderMarkdown(md) {
+  return md
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    // headers
+    .replace(/^#### (.+)$/gm,'<h4>$1</h4>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm,  '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm,   '<h1>$1</h1>')
+    // inline
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,    '<em>$1</em>')
+    .replace(/`([^`]+)`/g,    '<code>$1</code>')
+    // lists
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+    // paragraphs: blank lines between non-tag blocks
+    .replace(/\n\n+/g, '</p><p>')
+    .replace(/\n/g, '<br>')
+    .replace(/^(?!<[hlipbcu])(.+)/gm, match => match) // keep as-is inside tags
+    // wrap in paragraph
+    .replace(/^(.)/m, '<p>$1')
+    + '</p>';
+}
+
+// ================================================================
 // GAMES (gn-math.dev)
 // ================================================================
 const GNM_COVERS = 'https://cdn.jsdelivr.net/gh/freebuisness/covers@main';
@@ -2217,7 +2458,8 @@ async function loadRecentGames() {
   const wrap = document.getElementById('gnm-recent');
   if (!wrap) return;
   try {
-    const recent = await apiFetch('/api/games/recent');
+    const recentRes = await fetch('/api/games/recent', { credentials: 'include' });
+    const recent = recentRes.ok ? await recentRes.json() : [];
     if (!recent || !recent.length) {
       wrap.innerHTML = `<div class="games-empty" style="grid-column:1/-1">No games played yet — click any game to start!</div>`;
       return;
@@ -2294,8 +2536,9 @@ async function openGame(id) {
   // Record play progress for logged-in users (fire-and-forget)
   if (S.user) {
     try {
-      await apiFetch('/api/games/play', {
+      await fetch('/api/games/play', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ game_id: String(g.id), game_name: g.name })
       });

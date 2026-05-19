@@ -139,7 +139,18 @@ async function initDB() {
       last_played TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_id, game_id)
     );
+
+    CREATE TABLE IF NOT EXISTS user_strikes (
+      id         SERIAL PRIMARY KEY,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      given_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      reason     TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
   `);
+
+  // Idempotent column migrations
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS strikes INTEGER NOT NULL DEFAULT 0`);
 
   // Seed default teams on first run
   const { rows } = await pool.query('SELECT COUNT(*) AS c FROM teams');

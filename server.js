@@ -13,7 +13,7 @@ const DISABLE_IP_CHECK = process.env.DISABLE_IP_CHECK !== 'false';
 const IS_PROD        = process.env.NODE_ENV === 'production';
 
 app.set('trust proxy', 1);
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));  // large limit for base64 image uploads
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -351,7 +351,8 @@ app.post('/api/chat', requireAuth, a(async (req, res) => {
 app.get('/api/admin/users', requireRole('owner'), a(async (req, res) => {
   res.json(await pool.q(`
     SELECT u.id, u.username, u.plain_password, u.role, u.team_id, u.ip_address, u.banned, u.created_at,
-           u.custom_role_id, cr.name AS custom_role_name, cr.color AS custom_role_color
+           u.custom_role_id, cr.name AS custom_role_name, cr.color AS custom_role_color,
+           COALESCE(u.strikes, 0) AS strikes
     FROM users u
     LEFT JOIN custom_roles cr ON u.custom_role_id = cr.id
     ORDER BY u.id
@@ -780,6 +781,133 @@ app.delete('/api/custom-roles/:id', requireRole('owner'), a(async (req, res) => 
 }));
 
 // ─────────────────────────────────────────────
+// STRIKE SYSTEM
+// ─────────────────────────────────────────────
+
+// Add a strike (owner or mod)
+app.post('/api/admin/users/:id/strike', requireRole('owner', 'mod'), a(async (req, res) => {
+  const target = await pool.one('SELECT id, role, strikes, banned FROM users WHERE id=$1', [req.params.id]);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  if (String(req.params.id) === String(req.user.id))
+    return res.status(400).json({ error: 'Cannot strike yourself' });
+  if (req.user.role === 'mod' && ['owner', 'mod'].includes(target.role))
+    return res.status(403).json({ error: 'Mods cannot strike owners or other mods' });
+
+  const { reason } = req.body || {};
+  await pool.run(
+    'INSERT INTO user_strikes (user_id, given_by, reason) VALUES ($1,$2,$3)',
+    [req.params.id, req.user.id, reason || null]
+  );
+  const updated = await pool.one(
+    'UPDATE users SET strikes = strikes + 1 WHERE id=$1 RETURNING strikes',
+    [req.params.id]
+  );
+  const autoBanned = updated.strikes >= 3;
+  if (autoBanned) await pool.run('UPDATE users SET banned=1 WHERE id=$1', [req.params.id]);
+
+  res.json({ strikes: updated.strikes, auto_banned: autoBanned });
+}));
+
+// Remove last strike (owner only)
+app.delete('/api/admin/users/:id/strike', requireRole('owner'), a(async (req, res) => {
+  const target = await pool.one('SELECT id, strikes, banned FROM users WHERE id=$1', [req.params.id]);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  if (target.strikes <= 0) return res.status(400).json({ error: 'No strikes to remove' });
+
+  await pool.run(
+    'DELETE FROM user_strikes WHERE id=(SELECT id FROM user_strikes WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1)',
+    [req.params.id]
+  );
+  const newStrikes = target.strikes - 1;
+  await pool.run('UPDATE users SET strikes=$1 WHERE id=$2', [newStrikes, req.params.id]);
+  if (target.banned && newStrikes < 3)
+    await pool.run('UPDATE users SET banned=0 WHERE id=$1', [req.params.id]);
+
+  res.json({ strikes: newStrikes, unbanned: target.banned && newStrikes < 3 });
+}));
+
+// ─────────────────────────────────────────────
+// AI HOMEWORK SOLVER  (OpenAI GPT-4o vision)
+// ─────────────────────────────────────────────
+
+function callOpenAI(base64Image, prompt) {
+  return new Promise((resolve, reject) => {
+    if (!process.env.OPENAI_API_KEY)
+      return reject(new Error('OPENAI_API_KEY is not set in Railway environment variables'));
+
+    const payload = JSON.stringify({
+      model: 'gpt-4o',
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: prompt },
+        { type: 'image_url', image_url: { url: base64Image, detail: 'high' } }
+      ]}]
+    });
+
+    const req = https.request({
+      hostname: 'api.openai.com',
+      path:     '/v1/chat/completions',
+      method:   'POST',
+      headers: {
+        'Content-Type':   'application/json',
+        'Authorization':  `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Length': Buffer.byteLength(payload),
+      }
+    }, r => {
+      let body = '';
+      r.on('data', c => body += c);
+      r.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          if (data.error) return reject(new Error(data.error.message));
+          const text = data.choices?.[0]?.message?.content;
+          if (!text) return reject(new Error('Empty AI response'));
+          resolve(text);
+        } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+app.post('/api/ai/homework', requireAuth, a(async (req, res) => {
+  const { image } = req.body || {};
+  if (!image || !image.startsWith('data:image'))
+    return res.status(400).json({ error: 'A valid image is required (data URL)' });
+
+  const prompt = `You are an expert homework tutor. Carefully read every detail in this homework image and solve it completely.
+
+Format your response with these exact sections:
+
+## Subject
+Identify the subject and topic.
+
+## Problem Summary
+Briefly describe what the assignment is asking.
+
+## Solution
+Step-by-step solution — show ALL work, explain each step clearly so a student can learn from it.
+
+## Answer
+The final, clean answer.
+
+## Suggested Title
+A short 4-6 word title for this assignment (e.g. "Chapter 5 Algebra Review").
+
+Be thorough and educational. If there are multiple questions, solve each one.`;
+
+  try {
+    const solution = await callOpenAI(image, prompt);
+    res.json({ solution });
+  } catch (e) {
+    const status = e.message.includes('API_KEY') ? 503 : 502;
+    res.status(status).json({ error: e.message });
+  }
+}));
+
+// ─────────────────────────────────────────────
 // GAME PROXY  — fetches game HTML server-side, injects auth script
 // ─────────────────────────────────────────────
 
@@ -878,7 +1006,7 @@ app.get('/api/search/results', requireAuth, a(async (req, res) => {
 
   try {
     const html = await fetchText(
-      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`
+      `https://duckduckgo.com/html/?q=${encodeURIComponent(q)}`
     );
 
     // HTML entity decoder

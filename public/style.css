@@ -1147,3 +1147,93 @@ tr:hover td { background: #fafafa; }
   .app { grid-template-columns: 1fr; grid-template-rows: 46px 1fr; }
   .sidebar { display: none; }
 }
+
+/* ── AI Homework Solver ─────────────────────────── */
+.hw-page {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 2rem 1.5rem 3rem; max-width: 700px; margin: 0 auto;
+}
+.hw-header { text-align: center; margin-bottom: 2rem; }
+.hw-title { font-size: 1.4rem; font-weight: 800; color: var(--text); margin-bottom: .35rem; }
+.hw-subtitle { font-size: .9rem; color: var(--muted); }
+
+/* Step container */
+.hw-step { width: 100%; }
+.hw-step-hidden { display: none !important; }
+
+/* Step 1 — drop zone */
+.hw-dropzone {
+  width: 100%;
+  border: 2.5px dashed var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.hw-dropzone:hover,
+.hw-dropzone.drag-over {
+  border-color: var(--accent);
+  background: #edf4ef;
+}
+.hw-drop-icon { font-size: 2.8rem; margin-bottom: .6rem; }
+.hw-drop-text { font-size: 1rem; font-weight: 600; color: var(--text); margin-bottom: .3rem; }
+.hw-drop-hint { font-size: .82rem; color: var(--muted); }
+
+/* Step 2 — details form */
+.hw-preview-wrap { text-align: center; margin-bottom: 1rem; }
+.hw-preview { max-width: 100%; max-height: 260px; border-radius: 8px; border: 1px solid var(--border); object-fit: contain; }
+.hw-step2-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .85rem; margin: 1rem 0; }
+@media (max-width: 500px) { .hw-step2-grid { grid-template-columns: 1fr; } }
+
+/* Step 3 — loading */
+.hw-loading-state { text-align: center; padding: 3rem 1rem; }
+@keyframes hwSpin { to { transform: rotate(360deg); } }
+.hw-spinner {
+  display: inline-block; width: 44px; height: 44px;
+  border: 4px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: hwSpin .8s linear infinite; margin-bottom: 1.2rem;
+}
+.hw-loading-msg { font-size: 1rem; font-weight: 600; color: var(--text); margin-bottom: .3rem; }
+.hw-loading-sub { font-size: .82rem; color: var(--muted); }
+
+/* Step 4 — result */
+.hw-result-bar {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: .5rem; margin-bottom: 1rem;
+}
+.hw-result-label { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); }
+.hw-result-content {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.1rem 1.2rem;
+  font-size: .92rem; color: var(--text); line-height: 1.7;
+  white-space: pre-wrap; width: 100%;
+}
+.hw-result-content h1,.hw-result-content h2,.hw-result-content h3 {
+  font-size: 1rem; font-weight: 700; margin: .8rem 0 .3rem; color: var(--text);
+}
+.hw-result-content code {
+  font-family: monospace; background: #eee; padding: 1px 4px; border-radius: 3px; font-size: .88rem;
+}
+.hw-result-content pre {
+  background: #f3f3f3; border: 1px solid var(--border); border-radius: 4px;
+  padding: .7rem 1rem; overflow-x: auto; margin: .5rem 0;
+}
+.hw-result-content ul,.hw-result-content ol { padding-left: 1.4rem; margin: .4rem 0; }
+.hw-result-content strong { font-weight: 700; }
+.hw-cal-form {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1rem 1.2rem; margin-top: 1rem;
+  display: flex; flex-direction: column; gap: .75rem;
+}
+.hw-cal-form .form-row { display: flex; gap: .75rem; flex-wrap: wrap; }
+.hw-cal-form .form-row .form-group { flex: 1; min-width: 140px; }
+
+/* ── Strike badges ──────────────────────────────── */
+.strike-dot { font-size: .85rem; line-height: 1; }
+.strike-count {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 12px; font-weight: 600; color: #c0392b;
+}
+.strike-none { color: var(--muted); font-size: 12px; }
