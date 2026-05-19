@@ -1,0 +1,17 @@
+node_modules/
+
+# Database files — never commit these; set DATA_DIR env var to keep them
+# outside the repo so re-deploys don't wipe your data.
+data.db
+data.db-shm
+data.db-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Environment variables
+.env
+
+# Logs
+*.log
+npm-debug.log*

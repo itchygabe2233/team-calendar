@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Forest green rounded background -->
+  <rect width="32" height="32" rx="5" fill="#3d6b4a"/>
+
+  <!-- Rainbow pride flag (right side, vertical stripes) -->
+  <rect x="17" y="8"  width="14" height="2.2" fill="#e63946"/>
+  <rect x="17" y="10.2" width="14" height="2.2" fill="#f4a261"/>
+  <rect x="17" y="12.4" width="14" height="2.2" fill="#e9c46a"/>
+  <rect x="17" y="14.6" width="14" height="2.2" fill="#57cc99"/>
+  <rect x="17" y="16.8" width="14" height="2.2" fill="#4895ef"/>
+  <rect x="17" y="19"   width="14" height="2.2" fill="#9b5de5"/>
+
+  <!-- Flagpole -->
+  <line x1="17" y1="7" x2="17" y2="26" stroke="#f7f3e9" stroke-width="1.3" stroke-linecap="round"/>
+
+  <!-- Person: head (dark brown / Black skin tone) -->
+  <circle cx="9" cy="5.5" r="2.6" fill="#3d1a00"/>
+
+  <!-- Person: spine -->
+  <line x1="9" y1="8.1" x2="9" y2="17" stroke="#f7f3e9" stroke-width="2.2" stroke-linecap="round"/>
+
+  <!-- Wheelchair back -->
+  <line x1="6.5" y1="11" x2="6.5" y2="17.5" stroke="#f7f3e9" stroke-width="1.8" stroke-linecap="round"/>
+
+  <!-- Wheelchair seat -->
+  <line x1="6.5" y1="17.5" x2="16" y2="17.5" stroke="#f7f3e9" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Arm reaching to flag -->
+  <line x1="9" y1="11.5" x2="17" y2="9.5" stroke="#f7f3e9" stroke-width="1.6" stroke-linecap="round"/>
+
+  <!-- Footrest -->
+  <line x1="14.5" y1="17.5" x2="16.5" y2="22" stroke="#f7f3e9" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- Rear wheelchair wheel -->
+  <circle cx="9.5" cy="23.5" r="5.2" fill="none" stroke="#f7f3e9" stroke-width="1.8"/>
+  <circle cx="9.5" cy="23.5" r="1.1" fill="#f7f3e9"/>
+
+  <!-- Small front wheel -->
+  <circle cx="17" cy="23.5" r="1.9" fill="none" stroke="#f7f3e9" stroke-width="1.3"/>
+
+  <!-- Star of David (golden, necklace / chest area) -->
+  <!-- Upper triangle -->
+  <polygon points="9,9.5 11.1,13 6.9,13" fill="none" stroke="#ffd700" stroke-width="0.85" stroke-linejoin="round"/>
+  <!-- Lower triangle -->
+  <polygon points="9,13.5 11.1,10 6.9,10" fill="none" stroke="#ffd700" stroke-width="0.85" stroke-linejoin="round"/>
+</svg>
