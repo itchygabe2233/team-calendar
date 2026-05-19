@@ -830,15 +830,33 @@ app.delete('/api/admin/users/:id/strike', requireRole('owner'), a(async (req, re
 // AI HOMEWORK SOLVER  (Pollinations.AI — free, no key needed)
 // ─────────────────────────────────────────────
 
-function callPollinations(dataUrl, prompt) {
+// Temp image store: hold uploaded images in memory so Pollinations
+// can fetch them via a real HTTP URL (data: URIs aren't supported by proxies)
+const _tempImages = new Map();
+function storeTempImage(dataUrl) {
+  const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  _tempImages.set(id, dataUrl);
+  setTimeout(() => _tempImages.delete(id), 3 * 60 * 1000); // expire after 3 min
+  return id;
+}
+app.get('/api/ai/image-temp/:id', (req, res) => {
+  const dataUrl = _tempImages.get(req.params.id);
+  if (!dataUrl) return res.status(404).end();
+  const [header, b64] = dataUrl.split(',');
+  const mime = header.match(/data:([^;]+)/)?.[1] || 'image/jpeg';
+  res.set('Content-Type', mime);
+  res.send(Buffer.from(b64, 'base64'));
+});
+
+function callPollinations(imageUrl, prompt) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify({
-      model: 'openai-large',
+      model: 'openai',
       messages: [{
         role: 'user',
         content: [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }
+          { type: 'image_url', image_url: { url: imageUrl } }
         ]
       }],
       max_tokens: 2048
@@ -876,6 +894,13 @@ app.post('/api/ai/homework', requireAuth, a(async (req, res) => {
   if (!image || !image.startsWith('data:image'))
     return res.status(400).json({ error: 'A valid image is required (data URL)' });
 
+  // Store image temporarily and build a public URL Pollinations can fetch
+  const tempId  = storeTempImage(image);
+  const host    = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : `${req.protocol}://${req.get('host')}`;
+  const imageUrl = `${host}/api/ai/image-temp/${tempId}`;
+
   const prompt = `You are an expert homework tutor. Carefully read every detail in this homework image and solve it completely.
 
 Format your response with these exact sections:
@@ -898,7 +923,7 @@ A short 4-6 word title for this assignment (e.g. "Chapter 5 Algebra Review").
 Be thorough and educational. If there are multiple questions, solve each one.`;
 
   try {
-    const solution = await callPollinations(image, prompt);
+    const solution = await callPollinations(imageUrl, prompt);
     res.json({ solution });
   } catch (e) {
     const status = e.message.includes('API_KEY') ? 503 : 502;

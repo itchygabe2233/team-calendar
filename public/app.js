@@ -2193,11 +2193,21 @@ function renderHomeworkView() {
           <div class="hw-form-col">
             <h3 style="margin-bottom:1rem">Before solving…</h3>
             <div class="form-group">
-              <label>Which team is this for?</label>
-              <select id="hw-team-sel">
-                <option value="">— No team —</option>
+              <label>Which team is this for? <span style="color:#c0392b">*</span></label>
+              <select id="hw-team-sel" required>
+                <option value="">— Select a team —</option>
                 ${teamOpts}
               </select>
+              <div id="hw-team-err" style="color:#c0392b;font-size:12px;display:none">Please select a team.</div>
+            </div>
+            <div class="form-group">
+              <label>Assignment title <span style="color:#c0392b">*</span></label>
+              <input type="text" id="hw-title-input" placeholder="e.g. Chapter 5 Review" required>
+              <div id="hw-title-err" style="color:#c0392b;font-size:12px;display:none">Please enter a title.</div>
+            </div>
+            <div class="form-group">
+              <label>Description <span style="color:var(--muted);font-weight:400;font-size:11px">(optional)</span></label>
+              <input type="text" id="hw-desc-input" placeholder="e.g. Pages 42–48, problems 1–10">
             </div>
             <div class="form-group">
               <label>Due date</label>
@@ -2206,7 +2216,6 @@ function renderHomeworkView() {
             <button class="btn btn-primary hw-solve-btn" onclick="hwSolve()">
               🤖 Solve with AI
             </button>
-            <p style="font-size:.75rem;color:var(--muted);margin-top:.6rem">Requires OPENAI_API_KEY set in Railway settings.</p>
           </div>
         </div>
       </div>
@@ -2277,8 +2286,31 @@ function hwReset() {
 
 async function hwSolve() {
   if (!_hwImageBase64) return;
-  _hwTeamId  = document.getElementById('hw-team-sel')?.value  || '';
+
+  // Validate required fields
+  const teamSel   = document.getElementById('hw-team-sel');
+  const titleInp  = document.getElementById('hw-title-input');
+  const teamErr   = document.getElementById('hw-team-err');
+  const titleErr  = document.getElementById('hw-title-err');
+  let valid = true;
+
+  if (!teamSel?.value) {
+    if (teamErr) teamErr.style.display = 'block';
+    valid = false;
+  } else {
+    if (teamErr) teamErr.style.display = 'none';
+  }
+  if (!titleInp?.value.trim()) {
+    if (titleErr) titleErr.style.display = 'block';
+    valid = false;
+  } else {
+    if (titleErr) titleErr.style.display = 'none';
+  }
+  if (!valid) return;
+
+  _hwTeamId  = teamSel.value;
   _hwDueDate = document.getElementById('hw-due-input')?.value || todayISO();
+  _hwTitle   = titleInp.value.trim();
 
   document.getElementById('hw-step2').style.display = 'none';
   document.getElementById('hw-step3').style.display = 'flex';
@@ -2308,11 +2340,12 @@ async function hwSolve() {
 }
 
 async function hwAddToCalendar() {
-  const btn = document.getElementById('hw-cal-btn');
+  const btn  = document.getElementById('hw-cal-btn');
+  const desc = document.getElementById('hw-desc-input')?.value.trim() || '';
   try {
     await POST('/assignments', {
       title:       _hwTitle || 'AI Homework',
-      description: (_hwSolution || '').slice(0, 3000),
+      description: desc || (_hwSolution || '').slice(0, 500),
       due_date:    _hwDueDate || todayISO(),
       team_id:     _hwTeamId || null,
     });
