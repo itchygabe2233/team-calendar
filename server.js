@@ -846,7 +846,7 @@ function callGemini(base64Image, mimeType, prompt) {
     });
 
     const key  = process.env.GEMINI_API_KEY;
-    const path = `/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+    const path = `/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
 
     const req = https.request({
       hostname: 'generativelanguage.googleapis.com',
